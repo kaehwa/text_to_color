@@ -1,0 +1,52 @@
+{
+  "black": {
+    "emotion": ["슬픔"],
+    "percentage": 51,
+    "associations": ["고귀함", "차가움", "신비로움"]
+  },
+  "white": {
+    "emotion": ["안도"],
+    "percentage": 43,
+    "associations": ["진실", "무관심"]
+  },
+  "red": {
+    "emotion": ["사랑"],
+    "percentage": 68,
+    "associations": ["열정", "흥분"]
+  },
+  "blue": {
+    "emotion": ["안도"],
+    "percentage": 35,
+    "associations": ["지혜", "희망", "평화"]
+  },
+  "green": {
+    "emotion": ["만족"],
+    "percentage": 39,
+    "associations": ["자연", "성장"]
+  },
+  "yellow": {
+    "emotion": ["기쁨"],
+    "percentage": 52,
+    "associations": ["희망", "위험"]
+  },
+  "purple": {
+    "emotion": ["기쁨"],
+    "percentage": 25,
+    "associations": ["신비", "고귀함", "화려함"]
+  },
+  "brown": {
+    "emotion": ["혐오"],
+    "percentage": 36,
+    "associations": []
+  },
+  "orange": {
+    "emotion": ["기쁨"],
+    "percentage": 44,
+    "associations": ["따뜻함", "친절"]
+  },
+  "pink": {
+    "emotion": ["사랑"],
+    "percentage": 50,
+    "associations": ["부드러움", "소박함"]
+  }
+}
