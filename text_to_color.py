@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 from dotenv import load_dotenv
 load_dotenv()
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))  # 여기에 실제 키 입력
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))  
 
 with open("coloremotion.json", encoding="utf-8") as f:
     db = json.load(f)
