@@ -1,4 +1,3 @@
-# palette_fetchers.py
 import requests
 from typing import Optional
 
