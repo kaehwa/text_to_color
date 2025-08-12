@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../../Downloads/demo"
+		},
+		{
+			"path": "../images"
+		},
+		{
+			"path": "../yolov5"
 		}
 	],
 	"settings": {}

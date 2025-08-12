@@ -343,6 +343,124 @@ def fetch_upcoming_events_from_calendar(
     r.raise_for_status()
     return r.json().get("items", [])
 
+
+
+# --- Warm message generator (sweet mode) -----------------------------------
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+MESSAGE_LLM = ChatGoogleGenerativeAI(
+    model="gemini-1.5-pro",
+    temperature=0.7,          # 창의성 살짝 ↑
+    max_output_tokens=800,    # 길게 써도 OK
+    google_api_key=GOOGLE_API_KEY,
+)
+
+DEFAULT_TONE_BY_EMOTION = {
+    "사랑": "따뜻하고 다정하게, 과장 없이 진심을 담아",
+    "기쁨": "밝고 경쾌하게, 축하의 마음을 담아",
+    "감사": "정중하고 공손하게, 따뜻한 감사의 마음으로",
+    "슬픔": "차분하고 조심스럽게, 공감과 위로를 중심으로",
+    "설렘": "잔잔하고 설레는 톤으로, 기대와 응원을 담아",
+}
+
+SENSITIVE_SITUATIONS = {"장례", "추모", "부고"}
+
+MESSAGE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "너는 한국어 카피라이터다. 입력 정보를 바탕으로 받는 사람에게 전할 메시지를 쓴다.\n"
+     "규칙:\n"
+     "1) 한국어로 자연스럽게. 문장 수는 length에 맞추되 3~6문장 범위를 기본으로 한다.\n"
+     "2) 이모지/특수문자/해시태그 금지. 과장/클리셰 남발 금지.\n"
+     "3) 색 이름/HEX는 직접 쓰지 말고, 그 색이 주는 정서(따뜻함/차분함/설렘 등)만 은근히 녹여라.\n"
+     "4) 수신자 관계에 맞는 호칭과 공손도를 유지하라. 장례/추모 맥락이면 농담/밈/과한 수식 금지.\n"
+     "5) sweet_level과 humor_level에 따라 다정함/재치의 강도를 조절하라.\n"
+     "6) reference_phrases는 톤·리듬의 참고용으로 **직접 복붙 금지**, 의미를 살짝 비틀어 새 문장으로 재구성하라.\n"),
+    ("human",
+     "이벤트: {event_text}\n"
+     "감정: {emotion}\n"
+     "계절: {season}\n"
+     "수신자: {recipient_role}\n"
+     "보내는 사람: {sender_name}\n"
+     "요청 톤: {tone}\n"
+     "길이: {length}\n"
+     "sweet_level(0~10): {sweet_level}\n"
+     "humor_level(0~10): {humor_level}\n"
+     "연상어 요약: {assoc_summary}\n"
+     "참고 문장(재구성용): {reference_phrases}\n\n"
+     "위 정보를 바탕으로, 상황에 맞는 자연스러운 한국어 메시지를 작성해줘.")
+])
+
+_msg_parser = StrOutputParser()
+
+def _season_of(dt: datetime) -> str:
+    m = dt.month
+    if m in (3,4,5): return "봄"
+    if m in (6,7,8): return "여름"
+    if m in (9,10,11): return "가을"
+    return "겨울"
+
+def _summarize_hits(h: Dict[str, set]) -> str:
+    order = ("상황","무드","계절","톤","온도","팔레트","대비")
+    parts = []
+    for k in order:
+        if k in h and h[k]:
+            parts.append(f"{k}:{','.join(sorted(h[k]))}")
+    return "; ".join(parts) if parts else "없음"
+
+def _tidy_ko(s: str) -> str:
+    # 공백/마침표 정리
+    s = re.sub(r"[ \t]+", " ", s).strip()
+    s = re.sub(r"\s*\n\s*", "\n", s)
+    s = re.sub(r"([.!?])([^\s\n])", r"\1 \2", s)
+    return s
+
+def generate_warm_message(
+    event_text: str,
+    emotion: str,
+    event_date: datetime,
+    color_hexes: List[str],
+    assoc_hits: Dict[str,set],
+    recipient_role: str = "지인",
+    sender_name: str = "",
+    tone: Optional[str] = None,
+    length: str = "길게",           # "짧게/보통/길게" 중 택1
+    sweet_level: int = 8,           # 0~10 (스윗함)
+    humor_level: int = 3,           # 0~10 (재치)
+    reference_phrases: Optional[List[str]] = None
+) -> str:
+    season = _season_of(event_date)
+    tone = tone or DEFAULT_TONE_BY_EMOTION.get(emotion, "따뜻하고 진심 어린 톤으로")
+
+    # 슬픔/장례 맥락이면 자동으로 스윗/유머 OFF
+    if (emotion == "슬픔") or (assoc_hits.get("상황") and any(s in assoc_hits["상황"] for s in SENSITIVE_SITUATIONS)):
+        sweet_level = 0
+        humor_level = 0
+        length = "보통"
+        tone = DEFAULT_TONE_BY_EMOTION["슬픔"]
+
+    ref_str = ""
+    if reference_phrases:
+        # 복붙 방지: 앞에 “참고:” 명시만 하고 모델에 재구성 규칙이 있으므로 안전
+        ref_str = " / ".join(reference_phrases[:5])
+
+    prompt_vars = {
+        "event_text": event_text.strip(),
+        "emotion": emotion,
+        "season": season,
+        "recipient_role": recipient_role,
+        "sender_name": sender_name,
+        "tone": tone,
+        "length": length,
+        "sweet_level": max(0, min(10, sweet_level)),
+        "humor_level": max(0, min(10, humor_level)),
+        "assoc_summary": _summarize_hits(assoc_hits),
+        "reference_phrases": ref_str or "없음",
+    }
+    out = (MESSAGE_PROMPT | MESSAGE_LLM | _msg_parser).invoke(prompt_vars)
+    return _tidy_ko(out)
+
+
 def recommend_for_calendar_events(
     calendar_id: str = "primary",
     max_results: int = 10,
@@ -361,10 +479,39 @@ def recommend_for_calendar_events(
         loc   = (ev.get("location") or "").strip()
         parts = [p for p in [title, desc, loc] if p]
         event_text = " / ".join(parts) if parts else "일정"
-        with io.StringIO() as buf, redirect_stdout(buf):
-            rec = recommend_colors_for_event(event_text, start_dt, top_k_base=top_k_base, expand=expand)
-        results.append({"event_text": event_text, "event_date": start_dt, "rec": rec})
+
+        rec = recommend_colors_for_event(event_text, start_dt, top_k_base=top_k_base, expand=expand)
+
+            # recommend_for_calendar_events 내부에서 rec 생성 후…
+        assoc_hits = _assoc_hits_from_text(event_text, start_dt)
+
+        msg = generate_warm_message(
+            event_text=event_text,
+            emotion=rec["emotion"],
+            event_date=start_dt,
+            color_hexes=rec.get("base_hex", []),
+            assoc_hits=assoc_hits,
+            recipient_role="연인",                 # 상황에 맞게 바꿔
+            sender_name="",
+            tone=None,                            # 감정 기반 기본 톤 자동
+            length="길게",                        # ← 길게
+            sweet_level=9,                        # ← 스윗함 업!
+            humor_level=4,                        # ← 재치 조금
+            reference_phrases=[
+                "너 보려고 거울 봤는데, 나 왜 이렇게 잘생겼(예쁘)지?",
+                "오늘 내 계획은 너랑 놀면서 행복하기!",
+                "별거 아닌 하루에 별 같은 네가 나타났네."
+            ],
+        )
+        results.append({
+            "event_text": event_text,
+            "event_date": start_dt,
+            "rec": rec,
+            "message": msg,   # ← 추가
+        })
     return results
+
+
 
 if __name__ == "__main__":
     try:
@@ -381,3 +528,21 @@ if __name__ == "__main__":
             print(format_rgb_compact(rgb_all))
     except Exception:
         pass
+
+
+if __name__ == "__main__":
+    try:
+        items = recommend_for_calendar_events(
+            calendar_id="primary",  # ← 여기에 실제 캘린더 ID
+            max_results=50,
+            days_ahead=7,
+            top_k_base=2,
+            expand=True,
+        )
+        for it in items:
+            rec = it["rec"]
+            rgb_all = [tuple(map(int, t)) for t in (rec["rgb"]["base"] + rec["rgb"]["extra"])]
+            print(format_rgb_compact(rgb_all))
+            print("메시지:", it.get("message", ""))
+    except Exception as e:
+        print("오류:", e)
