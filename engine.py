@@ -1,6 +1,3 @@
-# bouquet_prompt_engine.py — prompt-first color recommender (no calendar)
-# v4: 관계 추론 + 감정 고정(LLM) + DB-가이드레일(prefer/avoid) + **감정 허용 집합을 COLOR_DB에 맞게 동적 확장**
-
 from __future__ import annotations
 
 import os, json, re
@@ -13,9 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# ----------------------------------------------------------------------------
-# CONFIG & CONSTANTS
-# ----------------------------------------------------------------------------
+
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
@@ -23,8 +18,6 @@ with open("coloremotion.json", encoding="utf-8") as f:
     COLOR_DB: Dict[str, Dict[str, Any]] = json.load(f)
 
 ALLOWED_COLORS = list(COLOR_DB.keys())
-
-# 이름 변형 정규화 (LLM이 토닉/딥/파스텔 등 변형명을 낼 때 안전장치)
 CANONICAL = {
     "navy": "blue", "sky blue": "blue",
     "mint": "green", "mint green": "green",
@@ -33,7 +26,9 @@ CANONICAL = {
     "charcoal": "black",
 }
 
-# COLOR_DB에서 감정 라벨을 동적으로 수집 + 기본 5종을 포함해 허용 감정 집합 생성
+
+
+# color DB 기반 감정 매핑
 def _collect_db_emotions() -> List[str]:
     s: set[str] = set()
     for meta in COLOR_DB.values():
@@ -48,17 +43,15 @@ def _collect_db_emotions() -> List[str]:
 ALLOWED_EMOTIONS: List[str] = _collect_db_emotions()
 EMOTION_SET: set[str] = set(ALLOWED_EMOTIONS)
 
-# 슬픔(장례/추모) 상황에서 피할 색상(고채도/따뜻 계열)
+# 슬픔(장례/추모) 상황에 대한 색깔만 특별히 분류 (장례식 예시..)
 FORBID_FOR_SORROW = {"red", "orange", "yellow", "pink"}
 PREFER_FOR_SORROW = ["white", "blue", "green", "black"]
 
-# DB 가이드레일 키워드
 FUNERAL_KEYS = {"장례", "추모", "부고"}
 FORMAL_RISK = {"과장감", "공격적", "눈부심", "가벼움", "유치함", "장시간", "격식↓", "피로", "거리감", "탁함", "차가움", "구식"}
 
-# ----------------------------------------------------------------------------
-# LLMs
-# ----------------------------------------------------------------------------
+
+#llm 3종
 JSON_LLM = ChatGoogleGenerativeAI(
     model="gemini-1.5-pro", temperature=0.4, max_output_tokens=600, google_api_key=GOOGLE_API_KEY
 )
@@ -71,9 +64,7 @@ AUX_LLM = ChatGoogleGenerativeAI(
 JSON_PARSER = StrOutputParser()
 TXT_PARSER = StrOutputParser()
 
-# ----------------------------------------------------------------------------
-# PROMPTS — 관계 추론 / 감정 추론 / 팔레트 / 메시지
-# ----------------------------------------------------------------------------
+#1. relation prompt 보내는 사람과 받는 사람의 관계 추론 (relation을 입력을 안했을 수도 있으니까)
 RELATION_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -99,7 +90,7 @@ JSON만 출력:"""
     ),
 ])
 
-
+# 2. emotion prompt — 감정 추론 (이벤트와 관계, 히스토리를 보고 허용된 감정(기쁨 슬픔 위로 등등) 중에서 정확히 딱 하나만 선택한다. llm이)
 EMOTION_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -116,7 +107,7 @@ SCHEMA = r'''{
   "avoid": ["피해야 할 색/특성"],
   "rationale": "선택 이유 요약"
 }'''
-
+# 3. palette prompt 허용된 감정을 뽑아주는 emotion prompt의 출력값을 기반으로 추천할 수 있는 색상을 뽑아준다.
 PALETTE_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -138,7 +129,7 @@ PALETTE_PROMPT = ChatPromptTemplate.from_messages([
         "허용 색상 목록: {allowed}\n확정 감정: {forced_emotion}\n관계 추론: {relation_json}\n컨텍스트:\n- 언제: {when_text}\n- 히스토리: {history}\n- 성별(수신자): {recipient_gender}\nJSON만 출력:",
     ),
 ])
-
+# 4. message prompt 핵심적으로 감정과 관계를 반영하여 메시지를 작성한다.
 MESSAGE_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -155,10 +146,14 @@ MESSAGE_PROMPT = ChatPromptTemplate.from_messages([
 6) 맥락 일치: 축하/기쁨에 추모 어휘 금지, 슬픔 맥락에 과도한 축하 어휘 금지.
 7) 관계/히스토리는 1문장 이내로만 암시한다.
 시적 장치 (감성 강화)
-8) **감각 이미지 1~2개**를 쓴다(냄새/소리/온기/빛/감촉). 예: 미역국의 김, 새벽 부엌의 물끓는 소리, 손등의 온기.
-9) **구체 장면 1개**를 짧게 불러온다(시장 골목, 창턱의 햇살, 젖은 앞치마 등).
-10) 물음표/느낌표 금지. 단정적 어조로 잔잔한 호흡 유지.
-11) 종결은 **약속/응원/축원** 중 하나로 맺고, ‘사랑한다’는 최대 1회만 자연스럽게 배치한다(보통 마지막 또는 끝에서 두 번째).
+8) 감각 이미지는 **보편·문화중립 사물/현상**에서 1~2개만 고른다: 빛, 바람, 비, 온기, 숨, 발걸음, 창가의 공기, 따뜻한 컵, 종이의 질감, 커튼의 흔들림, 나뭇결, 물결, 새벽의 적막 등.
+   - 예시는 참고용이며, 실제 출력에서는 **동의어로 재서술**한다.
+9) 구체 장면은 **범용 공간**에서 1개만 짧게 소환한다: 창가, 식탁, 책상, 복도, 현관, 계단, 길모퉁이, 버스 창, 공원 벤치 등.
+   - 지역·세대·의례 특수 소품(제수용품, 전통 장터 소도구 등)은 피한다.
+10) **금칙·클리셰 회피**: 아래 예시는 직접 사용하지 않는다(필요 시 동의어로 일반화하여 재서술).
+    - 미역국, 시장 골목, 장독대, 젖은 앞치마, 제사상/향, 아궁이, 볏짚, ‘창틀의 햇살’ 같은 과사용 관용구.
+11) 물음표/느낌표 금지. 단정적 어조로 잔잔한 호흡 유지.
+12) 종결은 **약속/응원/축원** 중 하나로 맺고, ‘사랑한다’는 최대 1회만 자연스럽게 배치한다(보통 마지막 또는 끝에서 두 번째).
 
 출력 형식
 - 한 문단, 줄바꿈 없이 문장만 출력한다."""
@@ -181,13 +176,9 @@ MESSAGE_PROMPT = ChatPromptTemplate.from_messages([
 
 
 
-# ----------------------------------------------------------------------------
-# HELPERS
-# ----------------------------------------------------------------------------
-
+# 잡다 필요한 함수들.. 색을 변환해서 출력한다던가 하는 간단한
 def _invoke(prompt, model, parser, payload) -> str:
     return (prompt | model | parser).invoke(payload)
-
 
 def _try_parse_json(text: str) -> Dict[str, Any]:
     if not text:
@@ -201,7 +192,6 @@ def _try_parse_json(text: str) -> Dict[str, Any]:
             continue
     return {}
 
-
 def _canonicalize_names(names: List[str]) -> List[str]:
     out = []
     for n in names or []:
@@ -210,14 +200,12 @@ def _canonicalize_names(names: List[str]) -> List[str]:
             out.append(k)
     return out
 
-
 def _to_hex_list(color_names: List[str]) -> List[str]:
     try:
         hx = ensure_hex_list(color_names)
         return [h for h in hx if isinstance(h, str) and h.startswith("#")]
     except Exception:
         return []
-
 
 def _select_rgb_values(rgb_base: List[Tuple[int,int,int]],
                        rgb_accent: List[Tuple[int,int,int]],
@@ -235,11 +223,10 @@ def _select_rgb_values(rgb_base: List[Tuple[int,int,int]],
         ordered.extend(ordered[: min_n - len(ordered)])
     return ordered[:max_n] if ordered else []
 
-
 def _format_rgb_compact(rgb_list: List[Tuple[int,int,int]]) -> str:
     return "rgb(" + ",".join(f"({r},{g},{b})" for (r, g, b) in rgb_list) + ")"
 
-# --- DB 가이드레일 도출 ------------------------------------------------------
+# 데이터 베이스에서 감정과 관련된 색깔을 추천해주는 함수
 
 def _assoc_by_cat(assoc_list: List[str]) -> Dict[str, set]:
     by: Dict[str, set] = {}
@@ -251,11 +238,10 @@ def _assoc_by_cat(assoc_list: List[str]) -> Dict[str, set]:
             by.setdefault("plain", set()).add(tok.strip())
     return by
 
-
+# 데이터 베이스에서 감정과 색을 보다 정교하게 매핑하기 위한..
 def _derive_prefer_avoid_from_db(emotion: str, when_text: str) -> Tuple[List[str], List[str]]:
     t = (when_text or "")
     is_funeral = any(k in t for k in FUNERAL_KEYS)
-
     prefer, avoid = set(), set()
     for color, meta in COLOR_DB.items():
         emos = set(meta.get("emotion") or [])
@@ -274,13 +260,12 @@ def _derive_prefer_avoid_from_db(emotion: str, when_text: str) -> Tuple[List[str
                     if base:
                         cautions.add(base)
         cautions |= (assoc.get("주의") or set())
-
-        # prefer: 감정 매칭 or 장례 상황에 해당 색이 상황:장례에 매핑되어 있으면
+        # 장례 등
         funeral_hit = bool((assoc.get("상황") or set()) & FUNERAL_KEYS)
         if (emotion in emos) or (is_funeral and funeral_hit):
             prefer.add(color)
 
-        # avoid: 주의어 교집합 + 장례 warm vivid
+        # 피해야할 상황제시
         if (cautions & FORMAL_RISK):
             avoid.add(color)
         if is_funeral and color in FORBID_FOR_SORROW:
@@ -290,9 +275,7 @@ def _derive_prefer_avoid_from_db(emotion: str, when_text: str) -> Tuple[List[str
     avoid_list  = [c for c in avoid  if c in ALLOWED_COLORS]
     return prefer_list, avoid_list
 
-# ----------------------------------------------------------------------------
-# INFERENCE — 관계 / 감정
-# ----------------------------------------------------------------------------
+#관계성을 뽑아내기 위한 프롬프트 기반 함수
 
 def infer_relation(
     actor: str,
@@ -312,14 +295,8 @@ def infer_relation(
     rel  = (info.get("relationship") or relationship_hint or "지인").strip()
     call = (info.get("recipient_call") or "").strip()
     politeness = (info.get("politeness") or "존댓말").strip()
-
-    # 🔧 (1) 과거 '어머니/엄마' 강제 보호 로직 제거 (오동작 원인)
-    #     -> 더 이상 recipient 문자열만으로 '어머니'를 고정하지 않음
-
-    # 🔧 (2) 세대 보정: 보내는 사람이 '상위 세대'인 경우, 잘못 추정된 부모 호칭을 자녀 호칭으로 교정
     elder_markers = ("할머니","할아버지","외할머니","외할아버지","어머니","아버지","엄마","아빠","부모","고모","이모","삼촌","큰엄마","큰아버지")
     parent_like_calls = {"어머니","어머님","엄마","아버지","아빠","부모님"}
-
     if any(k in actor for k in elder_markers):
         if (not call) or (call in parent_like_calls):
             g = (recipient_gender or "").strip()
@@ -328,8 +305,7 @@ def infer_relation(
             elif g.startswith("남"):
                 call = "아들"
             else:
-                call = "딸"  # 젠더 불명시 기본값
-
+                call = "딸" 
         # 관계도 자녀 축으로 정규화
         if rel in {"지인","동료","친구"}:
             rel = "부모"  # 상위세대 → '부모' 관계로 보정
@@ -352,11 +328,10 @@ def _rule_based_emotion(when_text: str) -> Optional[str]:
 
 
 def infer_emotion(when_text: str, relationship: str, history: str) -> str:
-    # 규칙 우선
+
     rb = _rule_based_emotion(when_text)
     if rb in EMOTION_SET:
         return rb
-    # LLM에 허용 감정 집합을 명시
     txt = _invoke(EMOTION_PROMPT, AUX_LLM, TXT_PARSER, {
         "allowed_emotions": ", ".join(ALLOWED_EMOTIONS),
         "when_text": when_text,
@@ -366,9 +341,7 @@ def infer_emotion(when_text: str, relationship: str, history: str) -> str:
     emo = re.sub(r"[^가-힣A-Za-z]", "", txt or "").strip()
     return emo if emo in EMOTION_SET else "기쁨"
 
-# ----------------------------------------------------------------------------
-# CORE API
-# ----------------------------------------------------------------------------
+
 
 def recommend_bouquet_colors(*,
     when_text: str,
@@ -381,8 +354,7 @@ def recommend_bouquet_colors(*,
     rgb_target: int = 4,
 ) -> Dict[str, Any]:
     """관계 추론 → 감정 확정(허용 감정=COLOR_DB 기반) → DB-가이드레일 → 팔레트(JSON) → HEX/RGB → 메시지."""
-
-    # 1) 관계 추론 (배경: actor가 고인일 수 있음)
+    # 관계 추론
     def _is_deceased(txt: str) -> bool:
         t = (txt or "")
         return any(k in t for k in ["돌아가신", "고인", "故", "하늘", "별세", "영면", "타계"])
@@ -390,14 +362,11 @@ def recommend_bouquet_colors(*,
     actor_is_deceased = _is_deceased(actor)
     actor_for_relation = actor
     rel_info = infer_relation(actor_for_relation, recipient, relationship)
-
-    # 2) 감정 확정(룰 기반 우선, 없으면 LLM)
+    # 제공된 룰 기반으로 감정을 매핑하되, 없으면 llm
     emotion = infer_emotion(when_text, rel_info["relationship"], history)
-
-    # 3) DB 가이드레일 산출
+    # 감정 정교화
     prefer, avoid = _derive_prefer_avoid_from_db(emotion, when_text)
 
-    # 4) 팔레트 JSON (감정 강제 + prefer/avoid 주입)
     relation_json = json.dumps(rel_info, ensure_ascii=False)
     palette_payload = {
         "allowed": ", ".join(ALLOWED_COLORS),
@@ -412,7 +381,7 @@ def recommend_bouquet_colors(*,
     }
     out = _try_parse_json(_invoke(PALETTE_PROMPT, JSON_LLM, JSON_PARSER, palette_payload))
 
-    # 5) 후처리 — 감정 기반 강제 규칙 적용(슬픔 시 금지색 제거 + 기본색 보충)
+    # 후처리 — 감정 기반 강제 규칙 적용(기본색 보충)
     base_names = _canonicalize_names(out.get("base_colors", []))
     acc_names  = _canonicalize_names(out.get("accent_colors", []))
 
@@ -426,7 +395,6 @@ def recommend_bouquet_colors(*,
                 if len(base_names) >= 2:
                     break
 
-    # Fallback: 최소 2색 확보
     names = base_names + [c for c in acc_names if c not in base_names]
     if len(names) < 2:
         ranked = sorted(ALLOWED_COLORS, key=lambda c: COLOR_DB[c].get("percentage", 0), reverse=True)
@@ -438,7 +406,7 @@ def recommend_bouquet_colors(*,
         base_names = names[:2]
         acc_names = names[2:3]
 
-    # 6) HEX 변환 + 유사색 확장(analogous만)
+    # HEX 변환 + 유사색 확장
     base_hex = _to_hex_list(base_names)
     acc_hex  = _to_hex_list(acc_names)
 
@@ -450,22 +418,22 @@ def recommend_bouquet_colors(*,
         except Exception:
             extra_hex = []
 
-    # 7) RGB 변환 + 3~4개 발췌
+    # RGB 변환 + 3~4개 발췌
     rgb_base   = [hex_to_rgb(h) for h in base_hex]
     rgb_accent = [hex_to_rgb(h) for h in acc_hex]
     rgb_extra  = [hex_to_rgb(h) for h in extra_hex]
     rgb_selected = _select_rgb_values(rgb_base, rgb_accent, rgb_extra, min_n=3, max_n=max(3, min(4, rgb_target)))
 
-    # 8) 메시지 생성(관계/호칭/말투 + 고인 시점 방지 반영)
+    # 메시지 생성(관계/호칭/말투 + 고인 시점 방지 반영)
     msg_text = _invoke(MESSAGE_PROMPT, MSG_LLM, TXT_PARSER, {
         "when_text": when_text,
-        "actor_effective": actor,          # <-- actor 그대로
+        "actor_effective": actor,         
         "actor_original": actor,
         "actor_is_deceased": "예" if actor_is_deceased else "아니오",
         "recipient": recipient,
         "recipient_gender": recipient_gender,
         "inferred_relationship": rel_info["relationship"],
-        "recipient_call": rel_info["recipient_call"],   # <-- 여기서 '딸' 전달됨
+        "recipient_call": rel_info["recipient_call"],   
         "politeness": rel_info["politeness"],
         "history": history or "",
         "emotion": emotion,
@@ -488,18 +456,17 @@ def recommend_bouquet_colors(*,
         "raw": out,
     }
 
-# ----------------------------------------------------------------------------
-# CLI demo
-# ----------------------------------------------------------------------------
+# demo input
+
 if __name__ == "__main__":
     demo = recommend_bouquet_colors(
-        when_text="엄마 생일",
-        actor="돌아가신 할아버지",
-        recipient="울 엄마",
-        relationship="딸",  # 힌트가 있어도 LLM이 재추론함
-        history="엄마는 할아버지랑 오래 같이 살았었어",
-        recipient_gender="여자",
-        rgb_target=4,
+        when_text="엄마 생일",  #이벤트 받기
+        actor="돌아가신 할아버지", # 누가 주는 상황이에요
+        recipient="울 엄마", # 누가 받는거에요
+        relationship="딸",  #둘은 무슨 관계?
+        history="엄마는 할아버지랑 오래 같이 살았었어", #추가적으로 둘의 추억을 아는게 있나요
+        recipient_gender="여자", #받는 이 성별
+        rgb_target=4, # 몇개의 색상 추천할래
     )
     print(demo.get("allowed_emotions"))
     print(demo.get("rgb_compact"))
