@@ -1,15 +1,13 @@
 from __future__ import annotations
-
 import os, json, re
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
-
 from HEXnRGB import ensure_hex_list, hex_to_rgb
 from expand_palette import expand_colors_from_external
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
+import random
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -99,7 +97,7 @@ EMOTION_PROMPT = ChatPromptTemplate.from_messages([
         "human",
         "언제/상황: {when_text}\n관계요약: {relationship}\n히스토리: {history}\n출력:"),
 ])
-
+#해당 schema 구조로 반환해야함
 SCHEMA = r'''{
   "emotion": "<허용 감정 중 1개>",
   "base_colors": ["..."],
@@ -174,8 +172,6 @@ MESSAGE_PROMPT = ChatPromptTemplate.from_messages([
     ),
 ])
 
-
-
 # 잡다 필요한 함수들.. 색을 변환해서 출력한다던가 하는 간단한
 def _invoke(prompt, model, parser, payload) -> str:
     return (prompt | model | parser).invoke(payload)
@@ -211,7 +207,9 @@ def _select_rgb_values(rgb_base: List[Tuple[int,int,int]],
                        rgb_accent: List[Tuple[int,int,int]],
                        rgb_extra: List[Tuple[int,int,int]],
                        min_n: int = 3,
-                       max_n: int = 5) -> List[Tuple[int,int,int]]:
+                       max_n: int = 5,
+                       seed: Optional[int] = None,
+                       rotate: bool = True) -> List[Tuple[int,int,int]]:
     seen = set(); ordered: List[Tuple[int,int,int]] = []
     for lst in (rgb_base, rgb_accent, rgb_extra):
         for t in lst:
@@ -219,9 +217,20 @@ def _select_rgb_values(rgb_base: List[Tuple[int,int,int]],
                 key = tuple(int(x) for x in t)
                 if key not in seen:
                     seen.add(key); ordered.append(key)
+
+    if not ordered:
+        return []
+    # 시드 기반 회전으로 첫 색 다양화 (기존 순서 최대한 보존)
+    if rotate:
+        rnd = random.Random(seed)
+        k = rnd.randrange(len(ordered))
+        ordered = ordered[k:] + ordered[:k]
+
     while len(ordered) < min_n and ordered:
         ordered.extend(ordered[: min_n - len(ordered)])
+
     return ordered[:max_n] if ordered else []
+
 
 def _format_rgb_compact(rgb_list: List[Tuple[int,int,int]]) -> str:
     return "rgb(" + ",".join(f"({r},{g},{b})" for (r, g, b) in rgb_list) + ")"
@@ -422,8 +431,10 @@ def recommend_bouquet_colors(*,
     rgb_base   = [hex_to_rgb(h) for h in base_hex]
     rgb_accent = [hex_to_rgb(h) for h in acc_hex]
     rgb_extra  = [hex_to_rgb(h) for h in extra_hex]
-    rgb_selected = _select_rgb_values(rgb_base, rgb_accent, rgb_extra, min_n=3, max_n=max(3, min(5, rgb_target)))
-
+    seed_val = abs(hash((when_text.strip(), actor.strip(), recipient.strip(), history.strip()))) & 0xFFFFFFFF
+    rgb_selected = _select_rgb_values(rgb_base, rgb_accent, rgb_extra, min_n=3, max_n=max(3, min(5, rgb_target)),seed=seed_val,rotate=True,)
+    if rgb_selected and rgb_selected[0] == (231, 76, 60) and emotion != "사랑":
+        rgb_selected = rgb_selected[1:] + [rgb_selected[0]]
     # 메시지 생성(관계/호칭/말투 + 고인 시점 방지 반영)
     msg_text = _invoke(MESSAGE_PROMPT, MSG_LLM, TXT_PARSER, {
         "when_text": when_text,
@@ -460,14 +471,13 @@ def recommend_bouquet_colors(*,
 
 if __name__ == "__main__":
     demo = recommend_bouquet_colors(
-        when_text="엄마 생일",  #이벤트 받기
-        actor="돌아가신 할아버지", # 누가 주는 상황이에요
-        recipient="울 엄마", # 누가 받는거에요
-        relationship="딸",  #둘은 무슨 관계?
-        history="엄마는 할아버지랑 오래 같이 살았었어", #추가적으로 둘의 추억을 아는게 있나요
-        recipient_gender="여자", #받는 이 성별
+        when_text="생신",  #이벤트 받기
+        actor="나", # 누가 주는 상황이에요
+        recipient="할머니", # 누가 받는거에요
+        relationship="할머니",  #둘은 무슨 관계?
+        history="", #추가적으로 둘의 추억을 아는게 있나요
+        recipient_gender="", #받는 이 성별
         rgb_target=5, # 몇개의 색상 추천할래
     )
-    print(demo.get("allowed_emotions"))
     print(demo.get("rgb_compact"))
     print("메시지:\n" + demo.get("message", ""))
