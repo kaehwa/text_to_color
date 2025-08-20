@@ -211,7 +211,7 @@ def _select_rgb_values(rgb_base: List[Tuple[int,int,int]],
                        rgb_accent: List[Tuple[int,int,int]],
                        rgb_extra: List[Tuple[int,int,int]],
                        min_n: int = 3,
-                       max_n: int = 4) -> List[Tuple[int,int,int]]:
+                       max_n: int = 5) -> List[Tuple[int,int,int]]:
     seen = set(); ordered: List[Tuple[int,int,int]] = []
     for lst in (rgb_base, rgb_accent, rgb_extra):
         for t in lst:
@@ -351,7 +351,7 @@ def recommend_bouquet_colors(*,
     history: str,
     recipient_gender: str,
     expand_analogous: bool = True,
-    rgb_target: int = 4,
+    rgb_target: int = 5,
 ) -> Dict[str, Any]:
     """관계 추론 → 감정 확정(허용 감정=COLOR_DB 기반) → DB-가이드레일 → 팔레트(JSON) → HEX/RGB → 메시지."""
     # 관계 추론
@@ -422,7 +422,7 @@ def recommend_bouquet_colors(*,
     rgb_base   = [hex_to_rgb(h) for h in base_hex]
     rgb_accent = [hex_to_rgb(h) for h in acc_hex]
     rgb_extra  = [hex_to_rgb(h) for h in extra_hex]
-    rgb_selected = _select_rgb_values(rgb_base, rgb_accent, rgb_extra, min_n=3, max_n=max(3, min(4, rgb_target)))
+    rgb_selected = _select_rgb_values(rgb_base, rgb_accent, rgb_extra, min_n=3, max_n=max(3, min(5, rgb_target)))
 
     # 메시지 생성(관계/호칭/말투 + 고인 시점 방지 반영)
     msg_text = _invoke(MESSAGE_PROMPT, MSG_LLM, TXT_PARSER, {
@@ -466,7 +466,7 @@ if __name__ == "__main__":
         relationship="딸",  #둘은 무슨 관계?
         history="엄마는 할아버지랑 오래 같이 살았었어", #추가적으로 둘의 추억을 아는게 있나요
         recipient_gender="여자", #받는 이 성별
-        rgb_target=4, # 몇개의 색상 추천할래
+        rgb_target=5, # 몇개의 색상 추천할래
     )
     print(demo.get("allowed_emotions"))
     print(demo.get("rgb_compact"))

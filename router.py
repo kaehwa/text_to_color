@@ -16,6 +16,6 @@ def recommend_bouquet(request: BouquetRequest):
         relationship=request.relationship or "",
         history=request.history or "",
         recipient_gender=request.recipient_gender or "",
-        rgb_target=request.rgb_target or 4
+        rgb_target=request.rgb_target or 5
     )
     return result

@@ -8,7 +8,7 @@ class BouquetRequest(BaseModel):
     relationship: Optional[str] = None
     history: Optional[str] = None
     recipient_gender: Optional[str] = None
-    rgb_target: Optional[int] = 4
+    rgb_target: Optional[int] = 5
 
 class BouquetResponse(BaseModel):
     #emotion: str

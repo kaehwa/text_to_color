@@ -36,7 +36,7 @@ def is_grayish(hx, sat_tol=12):
 THE_COLOR_API = "https://www.thecolorapi.com/scheme"
 COLORMIND_API = "http://colormind.io/api/"
 
-def get_scheme_from_thecolorapi(hex_seed: str, mode: str = "complement", count: int = 4) -> list[str]:
+def get_scheme_from_thecolorapi(hex_seed: str, mode: str = "complement", count: int = 5) -> list[str]:
     """
     hex_seed: '#733DCB' or '733DCB'
     mode: 'complement', 'analogic', 'triad', 'tetrad', 'monochrome', ...

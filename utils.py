@@ -9,5 +9,5 @@ def generate_bouquet_response(data: dict) -> dict:
         relationship=data.get("relationship", ""),
         history=data.get("history", ""),
         recipient_gender=data.get("recipient_gender", ""),
-        rgb_target=data.get("rgb_target", 4)
+        rgb_target=data.get("rgb_target", 5)
     )
